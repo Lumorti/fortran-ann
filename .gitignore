@@ -1,5 +1,7 @@
 # Prerequisites
 *.d
+*.py
+network.dat
 
 # Compiled Object files
 *.slo
