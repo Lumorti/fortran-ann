@@ -1,3 +1,14 @@
+!=============================================================================!
+!                             N E U R A L                                     !
+!=============================================================================!
+!                                                                             !
+! This module allows operations with artifical neural networks, including     !
+! intialisation, training, usage, saving and loading.                         !
+!                                                                             !
+!-----------------------------------------------------------------------------!
+! Written by Luke Mortimer, July 2019                                         !
+!=============================================================================!
+
 module neural
 
   ! Explicit typing only
@@ -5,6 +16,21 @@ module neural
 
   ! Everything is private unless specified
   private
+
+  !---------------------------------------------------------------------------!
+  !                       P u b l i c   R o u t i n e s                       !
+  !---------------------------------------------------------------------------!
+  public :: neural_init_network
+  public :: neural_use_network
+  public :: neural_train_network
+  public :: neural_train_network_direct
+  public :: neural_load_network
+  public :: neural_save_network
+
+  !---------------------------------------------------------------------------!
+  !                        P u b l i c   T y p e s                            !
+  !---------------------------------------------------------------------------!
+  public :: network
 
   ! The neural network type, stores info about lauer sizes, weights and biases
   type network
@@ -15,8 +41,13 @@ module neural
       integer                               :: max_size
   end type
 
-  public :: network, neural_train_network, neural_use_network, neural_init_network
-  public :: neural_save_network, neural_load_network, neural_train_network_direct
+  !---------------------------------------------------------------------------!
+  !                      P r i v a t e   R o u t i n e s                      !
+  !---------------------------------------------------------------------------!
+
+  !---------------------------------------------------------------------------!
+  !                      P r i v a t e   V a r i a b l e s                    !
+  !---------------------------------------------------------------------------!
 
 contains
 
@@ -58,44 +89,58 @@ contains
     real, dimension(:, :), allocatable :: input, output
 
     integer, parameter :: file_num = 18
-    integer :: stat, input_size, output_size, num_lines, i, j, num_data
+    integer :: ierr, input_size, output_size, num_lines, i, j, num_data
 
-    open(unit=file_num, file=file_name, iostat=stat)
-    if (stat /= 0) stop "Error opening file"
+    call trace_entry('neural_train_network', ierr)
 
+    ! Open the file to train from
+    open(unit=file_num, file=file_name, iostat=ierr)
+    if (ierr /= 0) stop "Error opening file"
+
+    ! Count the number of lines in the file
     num_lines = 0
     do
 
-      read(file_num, *, iostat=stat)
-      if (stat /= 0) exit
+      read(file_num, *, iostat=ierr)
+      if (ierr /= 0) exit
       num_lines = num_lines + 1
 
     end do
 
+    ! Restart
     rewind(file_num)
-    read(file_num, *, iostat=stat) input_size
-    read(file_num, *, iostat=stat) output_size
 
+    ! Get the size of the input and output arrays
+    read(file_num, *, iostat=ierr) input_size
+    read(file_num, *, iostat=ierr) output_size
+
+    ! Determine how many data sets there are
     num_data = int((num_lines - 2) / (input_size + output_size))
 
-    allocate(input(num_data, input_size))
-    allocate(output(num_data, output_size))
+    ! Allocate the arrays for storing the input/output data
+    allocate(input(num_data, input_size), stat=ierr)
+    if (ierr /= 0) call io_allocate_abort('input', 'neural_train_network')
+    allocate(output(num_data, output_size), stat=ierr)
+    if (ierr /= 0) call io_allocate_abort('output', 'neural_train_network')
 
+    ! Load the data into the input/output arrays
     do i = 1, num_data
 
       do j = 1, input_size
-        read(file_num, *, iostat=stat) input(i, j)
+        read(file_num, *, iostat=ierr) input(i, j)
       end do
-
       do j = 1, output_size
-        read(file_num, *, iostat=stat) output(i, j)
+        read(file_num, *, iostat=ierr) output(i, j)
       end do
 
     end do
 
     close(file_num)
 
+    ! Train the network using this data now in memory
     call neural_train_network_direct(net, input, output, repeat, learn_rate)
+
+    call trace_exit('neural_train_network', ierr)
 
   end subroutine neural_train_network
 
@@ -132,15 +177,15 @@ contains
     integer, optional, intent(in) :: repeat
     real, optional, intent(in) :: learn_rate
 
-    integer :: i,j,k,l, max
+    integer :: i,j,k,l, max, ierr
+    real :: lr
 
     real, dimension(net%nl, net%max_size, net%max_size) :: delta_weights
     real, dimension(net%nl-1, net%max_size) :: delta_biases
-
     real, dimension(net%nl, size(input, 1), net%max_size) :: layer_activations, layer_outputs
     real, dimension(net%nl, size(input, 1), net%max_size) :: layer_errors, d_layer
 
-    real :: lr
+    call trace_entry('neural_train_network_direct', ierr)
 
     ! If given a learn_rate, use that instead of the default
     if (present(learn_rate)) then
@@ -234,6 +279,8 @@ contains
 
     end do
 
+    call trace_exit('neural_train_network_direct', ierr)
+
   end subroutine neural_train_network_direct
 
   function neural_use_network(net, input)
@@ -262,7 +309,9 @@ contains
     real, dimension(net%ls(1)), intent(in) :: input
     real, dimension(net%ls(net%nl)) :: neural_use_network
     real, dimension(net%nl, 1, net%max_size) :: layer_activations, layer_outputs
-    integer :: j
+    integer :: j, ierr
+
+    call trace_entry('neural_use_network', ierr)
 
     ! Treat the input like the output of the first layer
     layer_outputs(1, 1, 1:net%ls(1)) = input
@@ -283,6 +332,8 @@ contains
 
     ! The results are the last layer outputs
     neural_use_network = layer_outputs(net%nl, 1, 1:net%ls(net%nl))
+
+    call trace_exit('neural_use_network', ierr)
 
   end function neural_use_network
 
@@ -311,17 +362,29 @@ contains
 
     type(network), intent(inout) :: net
     integer, dimension(:), intent(in) :: sizes
-    integer :: i, j, k
+    integer :: i, j, k, ierr
+
+    call trace_entry('neural_init_network', ierr)
 
     net%nl = size(sizes(:))
-    allocate(net%ls(net%nl))
+
+    ! Allocate the layer sizes list
+    allocate(net%ls(net%nl), stat=ierr)
+    if (ierr /= 0) call io_allocate_abort('net%nl', 'neural_init_network')
+
     net%ls = sizes
     net%max_size = maxval(sizes(:))
-    allocate(net%weights(net%nl-1, net%max_size, net%max_size))
-    allocate(net%biases(net%nl-1, net%max_size))
 
+    ! Allocate the weights and biases arrays
+    allocate(net%weights(net%nl-1, net%max_size, net%max_size), stat=ierr)
+    if (ierr /= 0) call io_allocate_abort('net%weights', 'neural_init_network')
+    allocate(net%biases(net%nl-1, net%max_size), stat=ierr)
+    if (ierr /= 0) call io_allocate_abort('net%biases', 'neural_init_network')
+
+    ! Init the random generator
     call RANDOM_seed()
 
+    ! Randomise the initial weights
     net%weights = 0
     do i=1, net%nl-1
       do j=1, net%ls(i)
@@ -331,12 +394,15 @@ contains
       end do
     end do
 
+    ! Randomise the initial biases
     net%biases = 0
     do i=1, net%nl-1
       do j=1, net%max_size
           net%biases(i,j) = neural_normal()
       end do
     end do
+
+    call trace_exit('neural_init_network', ierr)
 
   end subroutine neural_init_network
 
@@ -363,20 +429,33 @@ contains
     type(network), intent(inout) :: net
     character(*), intent(in) :: file
     integer, parameter :: file_num = 16
-    integer :: i, j, k, stat
+    integer :: i, j, k, ierr
+
+    call trace_entry('neural_load_network', ierr)
 
     ! Deallocate if already allocated
-    if (allocated(net%ls)) deallocate(net%ls)
-    if (allocated(net%weights)) deallocate(net%weights)
-    if (allocated(net%biases)) deallocate(net%biases)
+    if (allocated(net%ls)) then
+      deallocate(net%ls, stat=ierr)
+      if (ierr /= 0) call io_abort('Error in deallocating net%ls in neural_load_network')
+    end if
+    if (allocated(net%weights)) then
+      deallocate(net%weights, stat=ierr)
+      if (ierr /= 0) call io_abort('Error in deallocating net%weights in neural_load_network')
+    end if
+    if (allocated(net%biases)) then
+      deallocate(net%biases, stat=ierr)
+      if (ierr /= 0) call io_abort('Error in deallocating net%biases in neural_load_network')
+    end if
 
     ! Open the file containing network info
-    open(unit=file_num, file=file, iostat=stat)
-    if (stat /= 0) stop "Error opening file"
+    open(unit=file_num, file=file, iostat=ierr)
+    if (ierr /= 0) stop "Error opening file"
 
     ! Sizes first
     read(file_num, *) net%nl
-    allocate(net%ls(net%nl))
+    allocate(net%ls(net%nl), stat=ierr)
+    if (ierr /= 0) call io_allocate_abort('net%ls', 'neural_load_network')
+
     do i = 1, net%nl
       read(file_num, *) net%ls(i)
     end do
@@ -385,8 +464,10 @@ contains
     net%max_size = maxval(net%ls(:))
 
     ! Allocate the arrays
-    allocate(net%weights(net%nl-1, net%max_size, net%max_size))
-    allocate(net%biases(net%nl-1, net%max_size))
+    allocate(net%weights(net%nl-1, net%max_size, net%max_size), stat=ierr)
+    if (ierr /= 0) call io_allocate_abort('net%weights', 'neural_load_network')
+    allocate(net%biases(net%nl-1, net%max_size), stat=ierr)
+    if (ierr /= 0) call io_allocate_abort('net%biases', 'neural_load_network')
 
     ! Then weights
     do i = 1, net%nl-1
@@ -405,6 +486,8 @@ contains
     end do
 
     close(file_num)
+
+    call trace_exit('neural_load_network', ierr)
 
   end subroutine neural_load_network
 
@@ -431,10 +514,15 @@ contains
     type(network), intent(in) :: net
     character(*), intent(in) :: file
     integer, parameter :: file_num = 16
-    integer :: i, j, k, stat
+    integer :: i, j, k, ierr
 
-    open(unit=file_num, file=file, iostat=stat)
-    if (stat /= 0) stop "Error opening file"
+    call trace_entry('neural_save_network', ierr)
+
+    open(unit=file_num, file=file, iostat=ierr)
+    if (ierr /= 0) then
+      call io_abort('Error opening file in neural_save_network')
+      return
+    end if
 
     ! Sizes first
     write(file_num, *) net%nl
@@ -459,6 +547,8 @@ contains
     end do
 
     close(file_num)
+
+    call trace_exit('neural_save_network', ierr)
 
   end subroutine neural_save_network
 
@@ -578,6 +668,7 @@ contains
     call random_number(temp_rand2)
     call random_number(temp_rand3)
 
+    ! Simple approximation, tends to stick around 0.5 as desired
     neural_normal = (temp_rand1 + temp_rand2 + temp_rand3) / 3.0
 
   end function neural_normal
