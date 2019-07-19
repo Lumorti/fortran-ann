@@ -73,6 +73,8 @@ contains
     ! Parent module variables used:                                           !
     !-------------------------------------------------------------------------!
     ! Modules used:                                                           !
+    ! trace     for tracing entry and exit                                    !
+    ! io        for error messages                                            !
     !-------------------------------------------------------------------------!
     ! Key Internal Variables:                                                 !
     !-------------------------------------------------------------------------!
@@ -80,6 +82,9 @@ contains
     !-------------------------------------------------------------------------!
     ! Written by Luke Mortimer, July 2019                                     !
     !=========================================================================!
+
+    use trace, only: trace_entry, trace_exit
+    use io, only: io_allocate_abort
 
     type(network), intent(inout) :: net
     character(*), intent(in) :: file_name
@@ -163,6 +168,7 @@ contains
     ! Parent module variables used:                                           !
     !-------------------------------------------------------------------------!
     ! Modules used:                                                           !
+    ! trace     for tracing entry and exit                                    !
     !-------------------------------------------------------------------------!
     ! Key Internal Variables:                                                 !
     !-------------------------------------------------------------------------!
@@ -170,6 +176,8 @@ contains
     !-------------------------------------------------------------------------!
     ! Written by Luke Mortimer, July 2019                                     !
     !=========================================================================!
+
+    use trace, only: trace_entry, trace_exit
 
     type(network), intent(inout) :: net
     real, dimension(:, :), intent(in) :: input
@@ -297,6 +305,7 @@ contains
     ! Parent module variables used:                                           !
     !-------------------------------------------------------------------------!
     ! Modules used:                                                           !
+    ! trace     for tracing entry and exit                                    !
     !-------------------------------------------------------------------------!
     ! Key Internal Variables:                                                 !
     !-------------------------------------------------------------------------!
@@ -304,6 +313,8 @@ contains
     !-------------------------------------------------------------------------!
     ! Written by Luke Mortimer, July 2019                                     !
     !=========================================================================!
+
+    use trace, only: trace_entry, trace_exit
 
     type(network), intent(in) :: net
     real, dimension(net%ls(1)), intent(in) :: input
@@ -352,6 +363,8 @@ contains
     ! Parent module variables used:                                           !
     !-------------------------------------------------------------------------!
     ! Modules used:                                                           !
+    !       trace     for tracing entry and exit                              !
+    !       io        for error messages                                      !
     !-------------------------------------------------------------------------!
     ! Key Internal Variables:                                                 !
     !-------------------------------------------------------------------------!
@@ -359,6 +372,9 @@ contains
     !-------------------------------------------------------------------------!
     ! Written by Luke Mortimer, July 2019                                     !
     !=========================================================================!
+
+    use trace, only: trace_entry, trace_exit
+    use io, only: io_allocate_abort
 
     type(network), intent(inout) :: net
     integer, dimension(:), intent(in) :: sizes
@@ -414,10 +430,14 @@ contains
     !                                                                         !
     !-------------------------------------------------------------------------!
     ! Arguments:                                                              !
+    !       net,     intent(inout)       the network to load into             !
+    !       file,       intent(in)       the filename to load fro             !
     !-------------------------------------------------------------------------!
     ! Parent module variables used:                                           !
     !-------------------------------------------------------------------------!
     ! Modules used:                                                           !
+    ! trace     for tracing entry and exit                                    !
+    ! io        for error messages                                            !
     !-------------------------------------------------------------------------!
     ! Key Internal Variables:                                                 !
     !-------------------------------------------------------------------------!
@@ -425,6 +445,9 @@ contains
     !-------------------------------------------------------------------------!
     ! Written by Luke Mortimer, July 2019                                     !
     !=========================================================================!
+
+    use trace, only: trace_entry, trace_exit
+    use io, only: io_abort, io_allocate_abort
 
     type(network), intent(inout) :: net
     character(*), intent(in) :: file
@@ -499,10 +522,14 @@ contains
     !                                                                         !
     !-------------------------------------------------------------------------!
     ! Arguments:                                                              !
+    !       net,        intent(in)       the network to save                  !
+    !       file,       intent(in)       the filename to save to              !
     !-------------------------------------------------------------------------!
     ! Parent module variables used:                                           !
     !-------------------------------------------------------------------------!
     ! Modules used:                                                           !
+    ! trace     for tracing entry and exit                                    !
+    ! io        for error messages                                            !
     !-------------------------------------------------------------------------!
     ! Key Internal Variables:                                                 !
     !-------------------------------------------------------------------------!
@@ -510,6 +537,9 @@ contains
     !-------------------------------------------------------------------------!
     ! Written by Luke Mortimer, July 2019                                     !
     !=========================================================================!
+
+    use trace, only: trace_entry, trace_exit
+    use io, only: io_abort
 
     type(network), intent(in) :: net
     character(*), intent(in) :: file
@@ -560,6 +590,7 @@ contains
     !                                                                         !
     !-------------------------------------------------------------------------!
     ! Arguments:                                                              !
+    ! x,     intent(in)      the vector to apply the sigmoid function to      !
     !-------------------------------------------------------------------------!
     ! Parent module variables used:                                           !
     !-------------------------------------------------------------------------!
@@ -586,10 +617,11 @@ contains
 
     !=========================================================================!
     !                                                                         !
-    !  Applies the sigmoid function to an array             !
+    !  Applies the sigmoid function to an array                               !
     !                                                                         !
     !-------------------------------------------------------------------------!
     ! Arguments:                                                              !
+    ! x,     intent(in)      the array to apply the sigmoid function to       !
     !-------------------------------------------------------------------------!
     ! Parent module variables used:                                           !
     !-------------------------------------------------------------------------!
@@ -622,6 +654,7 @@ contains
     !                                                                         !
     !-------------------------------------------------------------------------!
     ! Arguments:                                                              !
+    ! x,     intent(in)     the array to apply the sigmoid prime function to  !
     !-------------------------------------------------------------------------!
     ! Parent module variables used:                                           !
     !-------------------------------------------------------------------------!
