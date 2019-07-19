@@ -6,6 +6,7 @@ module neural
   ! Everything is private unless specified
   private
 
+  ! The neural network type, stores info about lauer sizes, weights and biases
   type network
       integer, dimension(:), allocatable    :: ls            ! Layer sizes
       integer                               :: nl            ! Number of layers
@@ -20,6 +21,34 @@ module neural
 contains
 
   subroutine neural_train_network(net, file_name, repeat, learn_rate)
+
+    !=========================================================================!
+    !                                                                         !
+    !  Train the network using data from a given file. This acts              !
+    !  as a wrapper around neural_train_network_direct, loading the file      !
+    !  and passing it as arrays.                                              !
+    !                                                                         !
+    !  The first two lines should contain the number of inputs and outputs,   !
+    !  with the rest of the lines containing inputs and then outputs,         !
+    !  with every value on a different line.                                  !
+    !                                                                         !
+    !-------------------------------------------------------------------------!
+    ! Arguments:                                                              !
+    !       net,     intent(inout)       the network to train                 !
+    !       filename,   intent(in)       the file to train on                 !
+    !       repeat,     intent(in)       how many times to repeat the data    !
+    !       learn_rate, intent(in)       how fast the network should learn    !
+    !-------------------------------------------------------------------------!
+    ! Parent module variables used:                                           !
+    !-------------------------------------------------------------------------!
+    ! Modules used:                                                           !
+    !-------------------------------------------------------------------------!
+    ! Key Internal Variables:                                                 !
+    !-------------------------------------------------------------------------!
+    ! Necessary conditions:                                                   !
+    !-------------------------------------------------------------------------!
+    ! Written by Luke Mortimer, July 2019                                     !
+    !=========================================================================!
 
     type(network), intent(inout) :: net
     character(*), intent(in) :: file_name
@@ -70,9 +99,32 @@ contains
 
   end subroutine neural_train_network
 
-  ! Train the network
-  ! From https://towardsdatascience.com/implementing-the-xor-gate-using-backpropagation-in-neural-networks-c1f255b4f20d
   subroutine neural_train_network_direct(net, input, output, repeat, learn_rate)
+
+    !=========================================================================!
+    !                                                                         !
+    !  Train the neural network on sets of data, given as arrays, which       !
+    !  is generally less useful that the file-based wrapper                   !
+    !  neural_train_network.                                                  !
+    !                                                                         !
+    !-------------------------------------------------------------------------!
+    ! Arguments:                                                              !
+    !       net,     intent(inout)       the network to train                 !
+    !       input,      intent(in)       the input data to train on           !
+    !       output,     intent(in)       the output data to train on          !
+    !       repeat,     intent(in)       how many times to repeat the data    !
+    !       learn_rate, intent(in)       how fast the network should learn    !
+    !-------------------------------------------------------------------------!
+    ! Parent module variables used:                                           !
+    !-------------------------------------------------------------------------!
+    ! Modules used:                                                           !
+    !-------------------------------------------------------------------------!
+    ! Key Internal Variables:                                                 !
+    !-------------------------------------------------------------------------!
+    ! Necessary conditions:                                                   !
+    !-------------------------------------------------------------------------!
+    ! Written by Luke Mortimer, July 2019                                     !
+    !=========================================================================!
 
     type(network), intent(inout) :: net
     real, dimension(:, :), intent(in) :: input
@@ -80,7 +132,6 @@ contains
     integer, optional, intent(in) :: repeat
     real, optional, intent(in) :: learn_rate
 
-    integer :: data_size
     integer :: i,j,k,l, max
 
     real, dimension(net%nl, net%max_size, net%max_size) :: delta_weights
@@ -91,51 +142,68 @@ contains
 
     real :: lr
 
+    ! If given a learn_rate, use that instead of the default
     if (present(learn_rate)) then
       lr = learn_rate
     else
       lr = 1.0
     end if
 
-    data_size = size(input, 1)
-
+    ! If given a repeat number, use that instead of the default
     if (present(repeat)) then
       max = repeat
     else
       max = 1
     end if
 
+    ! Repeat as many times as requested
     do l=1, max
 
+      ! Reset things just in case
       layer_activations = 0
       layer_outputs = 0
       layer_errors = 0
       d_layer = 0
 
-      ! Forward Propagation
+      !----------------------------!
+      ! Begin forward propagation  !
+      !----------------------------!
+
+      ! Treat the input like the output of the first layer
       layer_outputs(1, :, 1:net%ls(1)) = input
+
+      ! Loop over the layers
       do j=2, net%nl
 
+        ! Multiply the previous layer results by the weights
         layer_activations(j, :, 1:net%ls(j)) = matmul(layer_outputs(j-1,:,1:net%ls(j-1)), &
         & net%weights(j-1,1:net%ls(j-1),1:net%ls(j)))
+
+        ! Add the biases
         do i=1, size(input, 1)
           layer_activations(j, i, 1:net%ls(j)) = layer_activations(j, i, 1:net%ls(j)) + net%biases(j-1, 1:net%ls(j))
         end do
-        layer_outputs(j, :, 1:net%ls(j)) = sigmoid_array(layer_activations(j, :, 1:net%ls(j)))
+
+        ! Sigmoid the activations to get the outputs
+        layer_outputs(j, :, 1:net%ls(j)) = neural_sigmoid_array(layer_activations(j, :, 1:net%ls(j)))
 
       end do
+
+      !------------------------------!
+      ! Begin backwards propagation  !
+      !------------------------------!
 
       ! Do output layer seperate since slightly different
       layer_errors(net%nl, :, 1:net%ls(net%nl)) = output - layer_outputs(net%nl, :, 1:net%ls(net%nl))
       d_layer(net%nl, :, 1:net%ls(net%nl)) = layer_errors(net%nl, :, 1:net%ls(net%nl)) * &
-      & sigmoid_prime_array(layer_outputs(net%nl, :, 1:net%ls(net%nl)))
+      & neural_sigmoid_prime_array(layer_outputs(net%nl, :, 1:net%ls(net%nl)))
 
       ! Backpropagate the rest of the layers
       do j=net%nl-1, 2, -1
 
         layer_errors(j, :, 1:net%ls(j)) = matmul(d_layer(j+1, :, 1:net%ls(j+1)), &
         & transpose(net%weights(j, 1:net%ls(j), 1:net%ls(j+1))))
-        d_layer(j, :, 1:net%ls(j)) = layer_errors(j, :, 1:net%ls(j)) * sigmoid_prime_array(layer_outputs(j, :, 1:net%ls(j)))
+        d_layer(j, :, 1:net%ls(j)) = layer_errors(j, :, 1:net%ls(j)) * neural_sigmoid_prime_array(layer_outputs(j, :, 1:net%ls(j)))
 
       end do
 
@@ -168,8 +236,27 @@ contains
 
   end subroutine neural_train_network_direct
 
-  ! Forward propagate through the network for a set of inputs
   function neural_use_network(net, input)
+
+    !=========================================================================!
+    !                                                                         !
+    !  Use the neural network on a set of inputs to produce a set of outputs  !
+    !                                                                         !
+    !-------------------------------------------------------------------------!
+    ! Arguments:                                                              !
+    !       net,     intent(in)       the network to train                    !
+    !       input,   intent(in)       the inputs to use                       !
+    !-------------------------------------------------------------------------!
+    ! Parent module variables used:                                           !
+    !-------------------------------------------------------------------------!
+    ! Modules used:                                                           !
+    !-------------------------------------------------------------------------!
+    ! Key Internal Variables:                                                 !
+    !-------------------------------------------------------------------------!
+    ! Necessary conditions:                                                   !
+    !-------------------------------------------------------------------------!
+    ! Written by Luke Mortimer, July 2019                                     !
+    !=========================================================================!
 
     type(network), intent(in) :: net
     real, dimension(net%ls(1)), intent(in) :: input
@@ -177,20 +264,50 @@ contains
     real, dimension(net%nl, 1, net%max_size) :: layer_activations, layer_outputs
     integer :: j
 
-    ! Forward Propagation
+    ! Treat the input like the output of the first layer
     layer_outputs(1, 1, 1:net%ls(1)) = input
+
+    ! Loop over the layers
     do j=2, net%nl
+
+      ! Multiply the previous layer results by the weights
       layer_activations(j, 1, 1:net%ls(j)) = matmul(layer_outputs(j-1,1,1:net%ls(j-1)), net%weights(j-1,1:net%ls(j-1),1:net%ls(j)))
+
+      ! Add the biases
       layer_activations(j, 1, 1:net%ls(j)) = layer_activations(j, 1, 1:net%ls(j)) + net%biases(j-1, 1:net%ls(j))
-      layer_outputs(j, 1, 1:net%ls(j)) = sigmoid_vector(layer_activations(j, 1, 1:net%ls(j)))
+
+      ! Sigmoid the activations to get the outputs
+      layer_outputs(j, 1, 1:net%ls(j)) = neural_sigmoid_vector(layer_activations(j, 1, 1:net%ls(j)))
+
     end do
 
+    ! The results are the last layer outputs
     neural_use_network = layer_outputs(net%nl, 1, 1:net%ls(net%nl))
 
   end function neural_use_network
 
-  ! Init the network to a specific size
   subroutine neural_init_network(net, sizes)
+
+    !=========================================================================!
+    !                                                                         !
+    !  Initialise the network to certain sizes, then using a normal           !
+    !  distribution to guess the starting weights and biases                  !
+    !                                                                         !
+    !-------------------------------------------------------------------------!
+    ! Arguments:                                                              !
+    !       net,     intent(inout)       the network to initialise            !
+    !       sizes,      intent(in)       an array of layer sizes              !
+    !-------------------------------------------------------------------------!
+    ! Parent module variables used:                                           !
+    !-------------------------------------------------------------------------!
+    ! Modules used:                                                           !
+    !-------------------------------------------------------------------------!
+    ! Key Internal Variables:                                                 !
+    !-------------------------------------------------------------------------!
+    ! Necessary conditions:                                                   !
+    !-------------------------------------------------------------------------!
+    ! Written by Luke Mortimer, July 2019                                     !
+    !=========================================================================!
 
     type(network), intent(inout) :: net
     integer, dimension(:), intent(in) :: sizes
@@ -209,7 +326,7 @@ contains
     do i=1, net%nl-1
       do j=1, net%ls(i)
         do k=1, net%ls(i+1)
-          net%weights(i,j,k) = normal()
+          net%weights(i,j,k) = neural_normal()
         end do
       end do
     end do
@@ -217,13 +334,31 @@ contains
     net%biases = 0
     do i=1, net%nl-1
       do j=1, net%max_size
-          net%biases(i,j) = normal()
+          net%biases(i,j) = neural_normal()
       end do
     end do
 
   end subroutine neural_init_network
 
   subroutine neural_load_network(net, file)
+
+    !=========================================================================!
+    !                                                                         !
+    !  Loads the network from a file, loading sizes first                     !
+    !                                                                         !
+    !-------------------------------------------------------------------------!
+    ! Arguments:                                                              !
+    !-------------------------------------------------------------------------!
+    ! Parent module variables used:                                           !
+    !-------------------------------------------------------------------------!
+    ! Modules used:                                                           !
+    !-------------------------------------------------------------------------!
+    ! Key Internal Variables:                                                 !
+    !-------------------------------------------------------------------------!
+    ! Necessary conditions:                                                   !
+    !-------------------------------------------------------------------------!
+    ! Written by Luke Mortimer, July 2019                                     !
+    !=========================================================================!
 
     type(network), intent(inout) :: net
     character(*), intent(in) :: file
@@ -235,6 +370,7 @@ contains
     if (allocated(net%weights)) deallocate(net%weights)
     if (allocated(net%biases)) deallocate(net%biases)
 
+    ! Open the file containing network info
     open(unit=file_num, file=file, iostat=stat)
     if (stat /= 0) stop "Error opening file"
 
@@ -245,6 +381,7 @@ contains
       read(file_num, *) net%ls(i)
     end do
 
+    ! Recalculate the max size
     net%max_size = maxval(net%ls(:))
 
     ! Allocate the arrays
@@ -272,6 +409,24 @@ contains
   end subroutine neural_load_network
 
   subroutine neural_save_network(net, file)
+
+    !=========================================================================!
+    !                                                                         !
+    !  Saves the network to a file, with size info first                      !
+    !                                                                         !
+    !-------------------------------------------------------------------------!
+    ! Arguments:                                                              !
+    !-------------------------------------------------------------------------!
+    ! Parent module variables used:                                           !
+    !-------------------------------------------------------------------------!
+    ! Modules used:                                                           !
+    !-------------------------------------------------------------------------!
+    ! Key Internal Variables:                                                 !
+    !-------------------------------------------------------------------------!
+    ! Necessary conditions:                                                   !
+    !-------------------------------------------------------------------------!
+    ! Written by Luke Mortimer, July 2019                                     !
+    !=========================================================================!
 
     type(network), intent(in) :: net
     character(*), intent(in) :: file
@@ -307,68 +462,124 @@ contains
 
   end subroutine neural_save_network
 
-  function sigmoid_vector(x)
+  function neural_sigmoid_vector(x)
+
+    !=========================================================================!
+    !                                                                         !
+    !  Applies the sigmoid function to a 1D vector                            !
+    !                                                                         !
+    !-------------------------------------------------------------------------!
+    ! Arguments:                                                              !
+    !-------------------------------------------------------------------------!
+    ! Parent module variables used:                                           !
+    !-------------------------------------------------------------------------!
+    ! Modules used:                                                           !
+    !-------------------------------------------------------------------------!
+    ! Key Internal Variables:                                                 !
+    !-------------------------------------------------------------------------!
+    ! Necessary conditions:                                                   !
+    !-------------------------------------------------------------------------!
+    ! Written by Luke Mortimer, July 2019                                     !
+    !=========================================================================!
 
     real, dimension(:), intent(in) :: x
-    real, dimension(size(x)) :: sigmoid_vector
+    real, dimension(size(x)) :: neural_sigmoid_vector
     integer :: i
 
     do i=1, size(x)
-      sigmoid_vector(i) = 1.0 / (1.0 + exp(-x(i)))
+      neural_sigmoid_vector(i) = 1.0 / (1.0 + exp(-x(i)))
     end do
 
-  end function sigmoid_vector
+  end function neural_sigmoid_vector
 
-  function sigmoid_array(x)
+  function neural_sigmoid_array(x)
+
+    !=========================================================================!
+    !                                                                         !
+    !  Applies the sigmoid function to an array             !
+    !                                                                         !
+    !-------------------------------------------------------------------------!
+    ! Arguments:                                                              !
+    !-------------------------------------------------------------------------!
+    ! Parent module variables used:                                           !
+    !-------------------------------------------------------------------------!
+    ! Modules used:                                                           !
+    !-------------------------------------------------------------------------!
+    ! Key Internal Variables:                                                 !
+    !-------------------------------------------------------------------------!
+    ! Necessary conditions:                                                   !
+    !-------------------------------------------------------------------------!
+    ! Written by Luke Mortimer, July 2019                                     !
+    !=========================================================================!
 
     real, dimension(:,:), intent(in) :: x
-    real, dimension(size(x,1), size(x,2)) :: sigmoid_array
+    real, dimension(size(x,1), size(x,2)) :: neural_sigmoid_array
     integer :: i, j
 
     do i=1, size(x,1)
       do j=1, size(x,2)
-        sigmoid_array(i, j) = 1.0 / (1.0 + exp(-x(i, j)))
+        neural_sigmoid_array(i, j) = 1.0 / (1.0 + exp(-x(i, j)))
       end do
     end do
 
-  end function sigmoid_array
+  end function neural_sigmoid_array
 
-  function sigmoid_prime_array(x)
+  function neural_sigmoid_prime_array(x)
+
+    !=========================================================================!
+    !                                                                         !
+    !  Applies the derivative of the sigmoid function to an array             !
+    !                                                                         !
+    !-------------------------------------------------------------------------!
+    ! Arguments:                                                              !
+    !-------------------------------------------------------------------------!
+    ! Parent module variables used:                                           !
+    !-------------------------------------------------------------------------!
+    ! Modules used:                                                           !
+    !-------------------------------------------------------------------------!
+    ! Key Internal Variables:                                                 !
+    !-------------------------------------------------------------------------!
+    ! Necessary conditions:                                                   !
+    !-------------------------------------------------------------------------!
+    ! Written by Luke Mortimer, July 2019                                     !
+    !=========================================================================!
 
     real, dimension(:,:), intent(in) :: x
-    real, dimension(size(x, 1), size(x, 2)) :: sigmoid_prime_array
+    real, dimension(size(x, 1), size(x, 2)) :: neural_sigmoid_prime_array
 
-    sigmoid_prime_array(:, :) = x(:, :)*(1.0 - x(:, :))
+    neural_sigmoid_prime_array(:, :) = x(:, :)*(1.0 - x(:, :))
 
-  end function sigmoid_prime_array
+  end function neural_sigmoid_prime_array
 
-  function normal()
+  function neural_normal()
 
-    real :: normal
+    !=========================================================================!
+    !                                                                         !
+    !  Approximates a normal distribution for the initial weights and biases  !
+    !                                                                         !
+    !-------------------------------------------------------------------------!
+    ! Arguments:                                                              !
+    !-------------------------------------------------------------------------!
+    ! Parent module variables used:                                           !
+    !-------------------------------------------------------------------------!
+    ! Modules used:                                                           !
+    !-------------------------------------------------------------------------!
+    ! Key Internal Variables:                                                 !
+    !-------------------------------------------------------------------------!
+    ! Necessary conditions:                                                   !
+    !-------------------------------------------------------------------------!
+    ! Written by Luke Mortimer, July 2019                                     !
+    !=========================================================================!
+
+    real :: neural_normal
     real :: temp_rand1, temp_rand2, temp_rand3
 
     call random_number(temp_rand1)
     call random_number(temp_rand2)
     call random_number(temp_rand3)
 
-    normal = (temp_rand1 + temp_rand2 + temp_rand3) / 3.0
+    neural_normal = (temp_rand1 + temp_rand2 + temp_rand3) / 3.0
 
-  end function normal
+  end function neural_normal
 
 end module neural
-
-program main
-
-  use neural
-
-  type(network) :: testNet
-
-  call neural_init_network(testNet, (/ 2, 3, 3, 1 /))
-  call neural_train_network(testNet, "xor.dat", 100000)
-
-  ! call neural_save_network(testNet, "network.dat")
-
-  print *, "1 and 1 = ", neural_use_network(testNet, (/ 1.0, 1.0 /))
-  print *, "0 and 1 = ", neural_use_network(testNet, (/ 0.0, 1.0 /))
-
-end program main
