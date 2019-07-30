@@ -1,13 +1,3 @@
-!=============================================================================!
-!                             N E U R A L                                     !
-!=============================================================================!
-!                                                                             !
-! This module allows operations with artifical neural networks, including     !
-! intialisation, training, usage, saving and loading.                         !
-!                                                                             !
-!-----------------------------------------------------------------------------!
-! Written by Luke Mortimer, July 2019                                         !
-!=============================================================================!
 
 module neural
 
@@ -17,90 +7,58 @@ module neural
   ! Everything is private unless specified
   private
 
-  !---------------------------------------------------------------------------!
-  !                       P u b l i c   R o u t i n e s                       !
-  !---------------------------------------------------------------------------!
   public :: neural_init_network
   public :: neural_use_network
-  public :: neural_train_network
+  public :: neural_train_network_file
   public :: neural_train_network_direct
   public :: neural_load_network
+  public :: neural_load_network_from_string
   public :: neural_save_network
+  public :: neural_save_network_to_string
+  public :: neural_convert_input
+  public :: neural_convert_output
+  public :: neural_sigmoid
 
-  !---------------------------------------------------------------------------!
-  !                        P u b l i c   T y p e s                            !
-  !---------------------------------------------------------------------------!
   public :: network
 
   ! The neural network type, stores info about lauer sizes, weights and biases
   type network
-      integer, dimension(:), allocatable    :: ls            ! Layer sizes
-      integer                               :: nl            ! Number of layers
-      real, dimension(:, :, :), allocatable :: weights
-      real, dimension(:, :), allocatable    :: biases
-      integer                               :: max_size
+      integer                                         :: nl            ! Number of layers
+      integer                                         :: max_size
+      integer, dimension(:), allocatable              :: ls            ! Layer sizes
+      double precision, dimension(:, :, :), allocatable :: weights
+      double precision, dimension(:, :), allocatable    :: biases
   end type
 
-  !---------------------------------------------------------------------------!
-  !                      P r i v a t e   R o u t i n e s                      !
-  !---------------------------------------------------------------------------!
-
-  !---------------------------------------------------------------------------!
-  !                      P r i v a t e   V a r i a b l e s                    !
-  !---------------------------------------------------------------------------!
+  interface neural_sigmoid
+    module procedure neural_sigmoid_vector
+    module procedure neural_sigmoid_array
+  end interface
 
 contains
 
-  subroutine neural_train_network(net, file_name, repeat, learn_rate)
+  ! Train a certain network from a file, repeating a number of times
+  subroutine neural_train_network_file(net, file_name, repeat, learn_rate)
 
-    !=========================================================================!
-    !                                                                         !
-    !  Train the network using data from a given file. This acts              !
-    !  as a wrapper around neural_train_network_direct, loading the file      !
-    !  and passing it as arrays.                                              !
-    !                                                                         !
-    !  The first two lines should contain the number of inputs and outputs,   !
-    !  with the rest of the lines containing inputs and then outputs,         !
-    !  with every value on a different line.                                  !
-    !                                                                         !
-    !-------------------------------------------------------------------------!
-    ! Arguments:                                                              !
-    !       net,     intent(inout)       the network to train                 !
-    !       filename,   intent(in)       the file to train on                 !
-    !       repeat,     intent(in)       how many times to repeat the data    !
-    !       learn_rate, intent(in)       how fast the network should learn    !
-    !-------------------------------------------------------------------------!
-    ! Parent module variables used:                                           !
-    !-------------------------------------------------------------------------!
-    ! Modules used:                                                           !
-    ! trace     for tracing entry and exit                                    !
-    ! io        for error messages                                            !
-    !-------------------------------------------------------------------------!
-    ! Key Internal Variables:                                                 !
-    !-------------------------------------------------------------------------!
-    ! Necessary conditions:                                                   !
-    !-------------------------------------------------------------------------!
-    ! Written by Luke Mortimer, July 2019                                     !
-    !=========================================================================!
-
-    use trace, only: trace_entry, trace_exit
-    use io, only: io_allocate_abort
-
+    ! The network to train
     type(network), intent(inout) :: net
+
+    ! The file to train on
     character(*), intent(in) :: file_name
+
+    ! How many times to repeat the training
     integer, optional, intent(in) :: repeat
-    real, optional, intent(in) :: learn_rate
 
-    real, dimension(:, :), allocatable :: input, output
+    ! How fast should it learn? [0,1]
+    double precision, optional, intent(in) :: learn_rate
 
-    integer, parameter :: file_num = 18
+    ! Internal vars
+    double precision, dimension(:, :), allocatable :: input, output
+    integer :: file_num
     integer :: ierr, input_size, output_size, num_lines, i, j, num_data
 
-    call trace_entry('neural_train_network', ierr)
-
-    ! Open the file to train from
-    open(unit=file_num, file=file_name, iostat=ierr)
-    if (ierr /= 0) stop "Error opening file"
+    open(newunit=file_num, file=file_name, status="old", iostat=ierr)
+    if (ierr /= 0) stop "Couldn't load file for training"
 
     ! Count the number of lines in the file
     num_lines = 0
@@ -119,14 +77,20 @@ contains
     read(file_num, *, iostat=ierr) input_size
     read(file_num, *, iostat=ierr) output_size
 
+    ! Check if these are right for the network and exit otherwise
+    if (input_size /= net%ls(1) .or. output_size /= net%ls(net%nl)) then
+      print *, "Error training from file, wrong number of inputs/outputs"
+      return
+    end if
+
     ! Determine how many data sets there are
     num_data = int((num_lines - 2) / (input_size + output_size))
 
     ! Allocate the arrays for storing the input/output data
     allocate(input(num_data, input_size), stat=ierr)
-    if (ierr /= 0) call io_allocate_abort('input', 'neural_train_network')
+    if (ierr /= 0) stop "Error allocating input array in neural_train_network_file"
     allocate(output(num_data, output_size), stat=ierr)
-    if (ierr /= 0) call io_allocate_abort('output', 'neural_train_network')
+    if (ierr /= 0) stop "Error allocating output array in neural_train_network_file"
 
     ! Load the data into the input/output arrays
     do i = 1, num_data
@@ -145,55 +109,31 @@ contains
     ! Train the network using this data now in memory
     call neural_train_network_direct(net, input, output, repeat, learn_rate)
 
-    call trace_exit('neural_train_network', ierr)
+  end subroutine neural_train_network_file
 
-  end subroutine neural_train_network
-
+  ! Train a network directly on some input/output data
   subroutine neural_train_network_direct(net, input, output, repeat, learn_rate)
 
-    !=========================================================================!
-    !                                                                         !
-    !  Train the neural network on sets of data, given as arrays, which       !
-    !  is generally less useful that the file-based wrapper                   !
-    !  neural_train_network.                                                  !
-    !                                                                         !
-    !-------------------------------------------------------------------------!
-    ! Arguments:                                                              !
-    !       net,     intent(inout)       the network to train                 !
-    !       input,      intent(in)       the input data to train on           !
-    !       output,     intent(in)       the output data to train on          !
-    !       repeat,     intent(in)       how many times to repeat the data    !
-    !       learn_rate, intent(in)       how fast the network should learn    !
-    !-------------------------------------------------------------------------!
-    ! Parent module variables used:                                           !
-    !-------------------------------------------------------------------------!
-    ! Modules used:                                                           !
-    ! trace     for tracing entry and exit                                    !
-    !-------------------------------------------------------------------------!
-    ! Key Internal Variables:                                                 !
-    !-------------------------------------------------------------------------!
-    ! Necessary conditions:                                                   !
-    !-------------------------------------------------------------------------!
-    ! Written by Luke Mortimer, July 2019                                     !
-    !=========================================================================!
-
-    use trace, only: trace_entry, trace_exit
 
     type(network), intent(inout) :: net
-    real, dimension(:, :), intent(in) :: input
-    real, dimension(:, :), intent(in) :: output
+    double precision, dimension(:, :), intent(in) :: input
+    double precision, dimension(:, :), intent(in) :: output
     integer, optional, intent(in) :: repeat
-    real, optional, intent(in) :: learn_rate
+    double precision, optional, intent(in) :: learn_rate
 
     integer :: i,j,k,l, max, ierr
-    real :: lr
+    double precision :: lr
 
-    real, dimension(net%nl, net%max_size, net%max_size) :: delta_weights
-    real, dimension(net%nl-1, net%max_size) :: delta_biases
-    real, dimension(net%nl, size(input, 1), net%max_size) :: layer_activations, layer_outputs
-    real, dimension(net%nl, size(input, 1), net%max_size) :: layer_errors, d_layer
+    double precision, dimension(net%nl, net%max_size, net%max_size) :: delta_weights
+    double precision, dimension(net%nl-1, net%max_size) :: delta_biases
+    double precision, dimension(net%nl, size(input, 1), net%max_size) :: layer_activations, layer_outputs
+    double precision, dimension(net%nl, size(input, 1), net%max_size) :: layer_errors, d_layer
 
-    call trace_entry('neural_train_network_direct', ierr)
+    ! Check if these sizes are right for the network and exit otherwise
+    if (size(input, 2) /= net%ls(1) .or. size(output, 2) /= net%ls(net%nl)) then
+      stop 'Error in neural_train_network_direct: wrong number of inputs/outputs'
+      return
+    end if
 
     ! If given a learn_rate, use that instead of the default
     if (present(learn_rate)) then
@@ -218,10 +158,6 @@ contains
       layer_errors = 0
       d_layer = 0
 
-      !----------------------------!
-      ! Begin forward propagation  !
-      !----------------------------!
-
       ! Treat the input like the output of the first layer
       layer_outputs(1, :, 1:net%ls(1)) = input
 
@@ -241,10 +177,6 @@ contains
         layer_outputs(j, :, 1:net%ls(j)) = neural_sigmoid_array(layer_activations(j, :, 1:net%ls(j)))
 
       end do
-
-      !------------------------------!
-      ! Begin backwards propagation  !
-      !------------------------------!
 
       ! Do output layer seperate since slightly different
       layer_errors(net%nl, :, 1:net%ls(net%nl)) = output - layer_outputs(net%nl, :, 1:net%ls(net%nl))
@@ -287,42 +219,17 @@ contains
 
     end do
 
-    call trace_exit('neural_train_network_direct', ierr)
-
   end subroutine neural_train_network_direct
 
+  ! Forward propogate some inputs through the network
   function neural_use_network(net, input)
 
-    !=========================================================================!
-    !                                                                         !
-    !  Use the neural network on a set of inputs to produce a set of outputs  !
-    !                                                                         !
-    !-------------------------------------------------------------------------!
-    ! Arguments:                                                              !
-    !       net,     intent(in)       the network to train                    !
-    !       input,   intent(in)       the inputs to use                       !
-    !-------------------------------------------------------------------------!
-    ! Parent module variables used:                                           !
-    !-------------------------------------------------------------------------!
-    ! Modules used:                                                           !
-    ! trace     for tracing entry and exit                                    !
-    !-------------------------------------------------------------------------!
-    ! Key Internal Variables:                                                 !
-    !-------------------------------------------------------------------------!
-    ! Necessary conditions:                                                   !
-    !-------------------------------------------------------------------------!
-    ! Written by Luke Mortimer, July 2019                                     !
-    !=========================================================================!
-
-    use trace, only: trace_entry, trace_exit
 
     type(network), intent(in) :: net
-    real, dimension(net%ls(1)), intent(in) :: input
-    real, dimension(net%ls(net%nl)) :: neural_use_network
-    real, dimension(net%nl, 1, net%max_size) :: layer_activations, layer_outputs
+    double precision, dimension(net%ls(1)), intent(in) :: input
+    double precision, dimension(net%ls(net%nl)) :: neural_use_network
+    double precision, dimension(net%nl, 1, net%max_size) :: layer_activations, layer_outputs
     integer :: j, ierr
-
-    call trace_entry('neural_use_network', ierr)
 
     ! Treat the input like the output of the first layer
     layer_outputs(1, 1, 1:net%ls(1)) = input
@@ -344,58 +251,44 @@ contains
     ! The results are the last layer outputs
     neural_use_network = layer_outputs(net%nl, 1, 1:net%ls(net%nl))
 
-    call trace_exit('neural_use_network', ierr)
-
   end function neural_use_network
 
+  ! Initialise the network with random weights
   subroutine neural_init_network(net, sizes)
 
-    !=========================================================================!
-    !                                                                         !
-    !  Initialise the network to certain sizes, then using a normal           !
-    !  distribution to guess the starting weights and biases                  !
-    !                                                                         !
-    !-------------------------------------------------------------------------!
-    ! Arguments:                                                              !
-    !       net,     intent(inout)       the network to initialise            !
-    !       sizes,      intent(in)       an array of layer sizes              !
-    !-------------------------------------------------------------------------!
-    ! Parent module variables used:                                           !
-    !-------------------------------------------------------------------------!
-    ! Modules used:                                                           !
-    !       trace     for tracing entry and exit                              !
-    !       io        for error messages                                      !
-    !-------------------------------------------------------------------------!
-    ! Key Internal Variables:                                                 !
-    !-------------------------------------------------------------------------!
-    ! Necessary conditions:                                                   !
-    !-------------------------------------------------------------------------!
-    ! Written by Luke Mortimer, July 2019                                     !
-    !=========================================================================!
-
-    use trace, only: trace_entry, trace_exit
-    use io, only: io_allocate_abort
 
     type(network), intent(inout) :: net
     integer, dimension(:), intent(in) :: sizes
     integer :: i, j, k, ierr
 
-    call trace_entry('neural_init_network', ierr)
+    ! Dellocate if already initialized
+    if (allocated(net%ls)) then
+      deallocate(net%ls, stat=ierr)
+      if (ierr /= 0) stop 'Error in deallocating net%ls in neural_init_network'
+    end if
+    if (allocated(net%weights)) then
+      deallocate(net%weights, stat=ierr)
+      if (ierr /= 0) stop 'Error in deallocating net%weights in neural_init_network'
+    end if
+    if (allocated(net%biases)) then
+      deallocate(net%biases, stat=ierr)
+      if (ierr /= 0) stop 'Error in deallocating net%biases in neural_init_network'
+    end if
 
     net%nl = size(sizes(:))
 
     ! Allocate the layer sizes list
     allocate(net%ls(net%nl), stat=ierr)
-    if (ierr /= 0) call io_allocate_abort('net%nl', 'neural_init_network')
+    if (ierr /= 0) stop "failed to allocate array"
 
     net%ls = sizes
     net%max_size = maxval(sizes(:))
 
     ! Allocate the weights and biases arrays
     allocate(net%weights(net%nl-1, net%max_size, net%max_size), stat=ierr)
-    if (ierr /= 0) call io_allocate_abort('net%weights', 'neural_init_network')
+    if (ierr /= 0) stop "failed to allocate array"
     allocate(net%biases(net%nl-1, net%max_size), stat=ierr)
-    if (ierr /= 0) call io_allocate_abort('net%biases', 'neural_init_network')
+    if (ierr /= 0) stop "failed to allocate array"
 
     ! Init the random generator
     call RANDOM_seed()
@@ -418,66 +311,38 @@ contains
       end do
     end do
 
-    call trace_exit('neural_init_network', ierr)
-
   end subroutine neural_init_network
 
+  ! Load the network from a file
   subroutine neural_load_network(net, file)
-
-    !=========================================================================!
-    !                                                                         !
-    !  Loads the network from a file, loading sizes first                     !
-    !                                                                         !
-    !-------------------------------------------------------------------------!
-    ! Arguments:                                                              !
-    !       net,     intent(inout)       the network to load into             !
-    !       file,       intent(in)       the filename to load fro             !
-    !-------------------------------------------------------------------------!
-    ! Parent module variables used:                                           !
-    !-------------------------------------------------------------------------!
-    ! Modules used:                                                           !
-    ! trace     for tracing entry and exit                                    !
-    ! io        for error messages                                            !
-    !-------------------------------------------------------------------------!
-    ! Key Internal Variables:                                                 !
-    !-------------------------------------------------------------------------!
-    ! Necessary conditions:                                                   !
-    !-------------------------------------------------------------------------!
-    ! Written by Luke Mortimer, July 2019                                     !
-    !=========================================================================!
-
-    use trace, only: trace_entry, trace_exit
-    use io, only: io_abort, io_allocate_abort
 
     type(network), intent(inout) :: net
     character(*), intent(in) :: file
-    integer, parameter :: file_num = 16
+    integer :: file_num
     integer :: i, j, k, ierr
-
-    call trace_entry('neural_load_network', ierr)
 
     ! Deallocate if already allocated
     if (allocated(net%ls)) then
       deallocate(net%ls, stat=ierr)
-      if (ierr /= 0) call io_abort('Error in deallocating net%ls in neural_load_network')
+      if (ierr /= 0) stop 'Error in deallocating net%ls in neural_load_network'
     end if
     if (allocated(net%weights)) then
       deallocate(net%weights, stat=ierr)
-      if (ierr /= 0) call io_abort('Error in deallocating net%weights in neural_load_network')
+      if (ierr /= 0) stop 'Error in deallocating net%weights in neural_load_network'
     end if
     if (allocated(net%biases)) then
       deallocate(net%biases, stat=ierr)
-      if (ierr /= 0) call io_abort('Error in deallocating net%biases in neural_load_network')
+      if (ierr /= 0) stop 'Error in deallocating net%biases in neural_load_network'
     end if
 
     ! Open the file containing network info
-    open(unit=file_num, file=file, iostat=ierr)
-    if (ierr /= 0) stop "Error opening file"
+    open(unit=file_num, file=file, status="old")
+    if (ierr /= 0) stop 'Failed to open file'
 
     ! Sizes first
     read(file_num, *) net%nl
     allocate(net%ls(net%nl), stat=ierr)
-    if (ierr /= 0) call io_allocate_abort('net%ls', 'neural_load_network')
+    if (ierr /= 0) stop "Failed to allocate array"
 
     do i = 1, net%nl
       read(file_num, *) net%ls(i)
@@ -488,9 +353,9 @@ contains
 
     ! Allocate the arrays
     allocate(net%weights(net%nl-1, net%max_size, net%max_size), stat=ierr)
-    if (ierr /= 0) call io_allocate_abort('net%weights', 'neural_load_network')
+    if (ierr /= 0) stop "failed to allocate array"
     allocate(net%biases(net%nl-1, net%max_size), stat=ierr)
-    if (ierr /= 0) call io_allocate_abort('net%biases', 'neural_load_network')
+    if (ierr /= 0) stop "failed to allocate array"
 
     ! Then weights
     do i = 1, net%nl-1
@@ -510,49 +375,20 @@ contains
 
     close(file_num)
 
-    call trace_exit('neural_load_network', ierr)
-
   end subroutine neural_load_network
 
+  ! Save the network to a file
   subroutine neural_save_network(net, file)
 
-    !=========================================================================!
-    !                                                                         !
-    !  Saves the network to a file, with size info first                      !
-    !                                                                         !
-    !-------------------------------------------------------------------------!
-    ! Arguments:                                                              !
-    !       net,        intent(in)       the network to save                  !
-    !       file,       intent(in)       the filename to save to              !
-    !-------------------------------------------------------------------------!
-    ! Parent module variables used:                                           !
-    !-------------------------------------------------------------------------!
-    ! Modules used:                                                           !
-    ! trace     for tracing entry and exit                                    !
-    ! io        for error messages                                            !
-    !-------------------------------------------------------------------------!
-    ! Key Internal Variables:                                                 !
-    !-------------------------------------------------------------------------!
-    ! Necessary conditions:                                                   !
-    !-------------------------------------------------------------------------!
-    ! Written by Luke Mortimer, July 2019                                     !
-    !=========================================================================!
-
-    use trace, only: trace_entry, trace_exit
-    use io, only: io_abort
 
     type(network), intent(in) :: net
     character(*), intent(in) :: file
-    integer, parameter :: file_num = 16
+    integer :: file_num
     integer :: i, j, k, ierr
 
-    call trace_entry('neural_save_network', ierr)
-
-    open(unit=file_num, file=file, iostat=ierr)
-    if (ierr /= 0) then
-      call io_abort('Error opening file in neural_save_network')
-      return
-    end if
+    ! Open the file to save the network to
+    open(newunit=file_num, file=file, status="new")
+    if (ierr /= 0) stop "Failed to open file"
 
     ! Sizes first
     write(file_num, *) net%nl
@@ -578,33 +414,131 @@ contains
 
     close(file_num)
 
-    call trace_exit('neural_save_network', ierr)
-
   end subroutine neural_save_network
 
+  ! Save the network to a string and return it
+  function neural_save_network_to_string(net)
+
+
+    type(network), intent(in) :: net
+    character(300) :: temp_result
+    character(:), allocatable :: neural_save_network_to_string
+    character(10) :: temp
+    integer :: i, j, k, ierr
+
+    ! Start with a blank string
+    temp_result = ""
+    temp = ""
+
+    ! Sizes first
+    write(temp, "(I3)") net%nl
+    temp_result = trim(temp_result) // trim(temp) // ","
+    do i = 1, net%nl
+      write(temp, "(I3)") net%ls(i)
+      temp_result = trim(temp_result) // trim(temp) // ","
+    end do
+
+    ! Then weights
+    do i = 1, net%nl-1
+      do j = 1, net%ls(i)
+        do k = 1, net%ls(i+1)
+          write(temp, "(f10.5)") net%weights(i,j,k)
+          temp_result = trim(temp_result) // trim(temp) // ","
+        end do
+      end do
+    end do
+
+    ! Then biases
+    do i = 1, net%nl-1
+      do j = 1, net%ls(i)
+        write(temp, "(f10.5)") net%biases(i,j)
+        temp_result = trim(temp_result) // trim(temp) // ","
+      end do
+    end do
+
+    ! Compress the result by removing whitespace
+    neural_save_network_to_string = ""
+    do i=1, len_trim(temp_result)
+      if (temp_result(i:i) /= " ") then
+        neural_save_network_to_string = trim(neural_save_network_to_string) // temp_result(i:i)
+      end if
+    end do
+
+  end function neural_save_network_to_string
+
+  ! Load the network from a string
+  subroutine neural_load_network_from_string(net, string)
+
+    type(network), intent(inout) :: net
+    character(*), intent(in) :: string
+    integer :: i, j, k, ierr, l, prev_l
+
+    ! Deallocate if already allocated
+    if (allocated(net%ls)) then
+      deallocate(net%ls, stat=ierr)
+      if (ierr /= 0) stop 'Error in deallocating net%ls in neural_load_network'
+    end if
+    if (allocated(net%weights)) then
+      deallocate(net%weights, stat=ierr)
+      if (ierr /= 0) stop 'Error in deallocating net%weights in neural_load_network'
+    end if
+    if (allocated(net%biases)) then
+      deallocate(net%biases, stat=ierr)
+      if (ierr /= 0) stop 'Error in deallocating net%biases in neural_load_network'
+    end if
+
+    ! Read the number of layers
+    prev_l = 0
+    l = index(string(:), ",")
+    read(string(prev_l+1:l-1), *) net%nl
+    allocate(net%ls(net%nl), stat=ierr)
+    if (ierr /= 0) stop "failed to allocate array"
+
+    ! Read the size of each layer
+    do i = 1, net%nl
+      prev_l = l
+      l = l+index(string(l+1:), ",")
+      read(string(prev_l+1:l-1), *) net%ls(i)
+    end do
+
+    ! Recalculate the max size
+    net%max_size = maxval(net%ls(:))
+
+    ! Allocate the arrays
+    allocate(net%weights(net%nl-1, net%max_size, net%max_size), stat=ierr)
+    if (ierr /= 0) stop "failed to allocate array"
+    allocate(net%biases(net%nl-1, net%max_size), stat=ierr)
+    if (ierr /= 0) stop "failed to allocate array"
+
+    ! Then weights
+    net%weights = 0
+    do i = 1, net%nl-1
+      do j = 1, net%ls(i)
+        do k = 1, net%ls(i+1)
+          prev_l = l
+          l = l+index(string(l+1:), ",")
+          read(string(prev_l+1:l-1), *) net%weights(i,j,k)
+        end do
+      end do
+    end do
+
+    ! Then biases
+    net%biases = 0
+    do i = 1, net%nl-1
+      do j = 1, net%ls(i)
+        prev_l = l
+        l = l+index(string(l+1:), ",")
+        read(string(prev_l+1:l-1), *) net%biases(i,j)
+      end do
+    end do
+
+  end subroutine neural_load_network_from_string
+
+  ! Apply the sigmoid to a 1D array
   function neural_sigmoid_vector(x)
 
-    !=========================================================================!
-    !                                                                         !
-    !  Applies the sigmoid function to a 1D vector                            !
-    !                                                                         !
-    !-------------------------------------------------------------------------!
-    ! Arguments:                                                              !
-    ! x,     intent(in)      the vector to apply the sigmoid function to      !
-    !-------------------------------------------------------------------------!
-    ! Parent module variables used:                                           !
-    !-------------------------------------------------------------------------!
-    ! Modules used:                                                           !
-    !-------------------------------------------------------------------------!
-    ! Key Internal Variables:                                                 !
-    !-------------------------------------------------------------------------!
-    ! Necessary conditions:                                                   !
-    !-------------------------------------------------------------------------!
-    ! Written by Luke Mortimer, July 2019                                     !
-    !=========================================================================!
-
-    real, dimension(:), intent(in) :: x
-    real, dimension(size(x)) :: neural_sigmoid_vector
+    double precision, dimension(:), intent(in) :: x
+    double precision, dimension(size(x)) :: neural_sigmoid_vector
     integer :: i
 
     do i=1, size(x)
@@ -613,29 +547,11 @@ contains
 
   end function neural_sigmoid_vector
 
+  ! Apply the sigmoid to a 2D array
   function neural_sigmoid_array(x)
 
-    !=========================================================================!
-    !                                                                         !
-    !  Applies the sigmoid function to an array                               !
-    !                                                                         !
-    !-------------------------------------------------------------------------!
-    ! Arguments:                                                              !
-    ! x,     intent(in)      the array to apply the sigmoid function to       !
-    !-------------------------------------------------------------------------!
-    ! Parent module variables used:                                           !
-    !-------------------------------------------------------------------------!
-    ! Modules used:                                                           !
-    !-------------------------------------------------------------------------!
-    ! Key Internal Variables:                                                 !
-    !-------------------------------------------------------------------------!
-    ! Necessary conditions:                                                   !
-    !-------------------------------------------------------------------------!
-    ! Written by Luke Mortimer, July 2019                                     !
-    !=========================================================================!
-
-    real, dimension(:,:), intent(in) :: x
-    real, dimension(size(x,1), size(x,2)) :: neural_sigmoid_array
+    double precision, dimension(:,:), intent(in) :: x
+    double precision, dimension(size(x,1), size(x,2)) :: neural_sigmoid_array
     integer :: i, j
 
     do i=1, size(x,1)
@@ -646,56 +562,34 @@ contains
 
   end function neural_sigmoid_array
 
+  ! Apply the inverse of the sigmoid to a 1D array
+  function neural_sigmoid_inv_vector(x)
+
+    double precision, dimension(:), intent(in) :: x
+    double precision, dimension(size(x)) :: neural_sigmoid_inv_vector
+    integer :: i
+
+    do i=1, size(x)
+      neural_sigmoid_inv_vector(i) = -log((1.0 / x(i)) - 1.0)
+    end do
+
+  end function neural_sigmoid_inv_vector
+
+  ! Apply the derivative of the sigmoid to a 2D array
   function neural_sigmoid_prime_array(x)
 
-    !=========================================================================!
-    !                                                                         !
-    !  Applies the derivative of the sigmoid function to an array             !
-    !                                                                         !
-    !-------------------------------------------------------------------------!
-    ! Arguments:                                                              !
-    ! x,     intent(in)     the array to apply the sigmoid prime function to  !
-    !-------------------------------------------------------------------------!
-    ! Parent module variables used:                                           !
-    !-------------------------------------------------------------------------!
-    ! Modules used:                                                           !
-    !-------------------------------------------------------------------------!
-    ! Key Internal Variables:                                                 !
-    !-------------------------------------------------------------------------!
-    ! Necessary conditions:                                                   !
-    !-------------------------------------------------------------------------!
-    ! Written by Luke Mortimer, July 2019                                     !
-    !=========================================================================!
-
-    real, dimension(:,:), intent(in) :: x
-    real, dimension(size(x, 1), size(x, 2)) :: neural_sigmoid_prime_array
+    double precision, dimension(:,:), intent(in) :: x
+    double precision, dimension(size(x, 1), size(x, 2)) :: neural_sigmoid_prime_array
 
     neural_sigmoid_prime_array(:, :) = x(:, :)*(1.0 - x(:, :))
 
   end function neural_sigmoid_prime_array
 
+  ! Return a number in a normal (ish) distribution
   function neural_normal()
 
-    !=========================================================================!
-    !                                                                         !
-    !  Approximates a normal distribution for the initial weights and biases  !
-    !                                                                         !
-    !-------------------------------------------------------------------------!
-    ! Arguments:                                                              !
-    !-------------------------------------------------------------------------!
-    ! Parent module variables used:                                           !
-    !-------------------------------------------------------------------------!
-    ! Modules used:                                                           !
-    !-------------------------------------------------------------------------!
-    ! Key Internal Variables:                                                 !
-    !-------------------------------------------------------------------------!
-    ! Necessary conditions:                                                   !
-    !-------------------------------------------------------------------------!
-    ! Written by Luke Mortimer, July 2019                                     !
-    !=========================================================================!
-
-    real :: neural_normal
-    real :: temp_rand1, temp_rand2, temp_rand3
+    double precision :: neural_normal
+    double precision :: temp_rand1, temp_rand2, temp_rand3
 
     call random_number(temp_rand1)
     call random_number(temp_rand2)
